@@ -1,6 +1,7 @@
 APP_NAME ?= FreeFlow Dev
 BUNDLE_ID ?= com.zachlatta.freeflow.dev
 BUILD_DIR = build
+SWIFT_MODULE_CACHE_DIR = $(BUILD_DIR)/SwiftModuleCache
 APP_BUNDLE = $(BUILD_DIR)/$(APP_NAME).app
 CODESIGN_IDENTITY ?= FreeFlow Dev
 CONTENTS = $(APP_BUNDLE)/Contents
@@ -36,12 +37,14 @@ ifeq ($(ARCH),universal)
 	swiftc \
 		-parse-as-library \
 		-o "$(MACOS_DIR)/$(APP_NAME)-arm64" \
+		-module-cache-path "$(SWIFT_MODULE_CACHE_DIR)" \
 		-sdk $(shell xcrun --show-sdk-path) \
 		-target arm64-apple-macosx13.0 \
 		$(SOURCES)
 	swiftc \
 		-parse-as-library \
 		-o "$(MACOS_DIR)/$(APP_NAME)-x86_64" \
+		-module-cache-path "$(SWIFT_MODULE_CACHE_DIR)" \
 		-sdk $(shell xcrun --show-sdk-path) \
 		-target x86_64-apple-macosx13.0 \
 		$(SOURCES)
@@ -53,6 +56,7 @@ else
 	swiftc \
 		-parse-as-library \
 		-o "$(MACOS_DIR)/$(APP_NAME)" \
+		-module-cache-path "$(SWIFT_MODULE_CACHE_DIR)" \
 		-sdk $(shell xcrun --show-sdk-path) \
 		-target $(ARCH)-apple-macosx13.0 \
 		$(SOURCES)
@@ -72,14 +76,15 @@ endif
 test: $(TEST_RUNNER)
 	@$(TEST_RUNNER)
 
-$(TEST_RUNNER): Sources/AppContextService.swift Sources/LLMAPITransport.swift Sources/ModelConfiguration.swift Tests/AppContextServiceTests.swift
+$(TEST_RUNNER): Sources/AppContextService.swift Sources/LLMAPITransport.swift Sources/ModelConfiguration.swift Sources/ProviderURLPolicy.swift Tests/AppContextServiceTests.swift
 	@mkdir -p "$(BUILD_DIR)"
 	swiftc \
 		-parse-as-library \
 		-o "$(TEST_RUNNER)" \
+		-module-cache-path "$(SWIFT_MODULE_CACHE_DIR)" \
 		-sdk $(shell xcrun --show-sdk-path) \
 		-target $(ARCH)-apple-macosx13.0 \
-		Sources/AppContextService.swift Sources/LLMAPITransport.swift Sources/ModelConfiguration.swift Tests/AppContextServiceTests.swift
+		Sources/AppContextService.swift Sources/LLMAPITransport.swift Sources/ModelConfiguration.swift Sources/ProviderURLPolicy.swift Tests/AppContextServiceTests.swift
 
 icon: $(ICON_ICNS)
 

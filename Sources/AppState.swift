@@ -236,6 +236,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let realtimeStreamingEnabledStorageKey = "realtime_streaming_enabled"
     private let realtimeStreamingModelStorageKey = "realtime_streaming_model"
     private let dictationAudioInterruptionEnabledStorageKey = "dictation_audio_interruption_enabled"
+    private let retainPipelineHistoryStorageKey = "retain_pipeline_history"
     private let pasteAfterShortcutReleaseDelay: TimeInterval = 0.03
     private let pressEnterAfterPasteDelay: TimeInterval = 0.08
     private let clipboardRestoreDelay: TimeInterval = 1.0
@@ -565,6 +566,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var isDebugOverlayActive = false
     @Published var selectedSettingsTab: SettingsTab? = .general
     @Published var pipelineHistory: [PipelineHistoryItem] = []
+    @Published var retainPipelineHistory: Bool {
+        didSet {
+            UserDefaults.standard.set(retainPipelineHistory, forKey: retainPipelineHistoryStorageKey)
+            if !retainPipelineHistory {
+                clearPipelineHistory()
+            }
+        }
+    }
     @Published var debugStatusMessage = "Idle"
     @Published var debugShowsUpdateReminderAfterDictation = false
     @Published var lastRawTranscript = ""
@@ -694,6 +703,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let dictationAudioInterruptionEnabled = UserDefaults.standard.bool(
             forKey: dictationAudioInterruptionEnabledStorageKey
         )
+        let retainPipelineHistory = UserDefaults.standard.bool(forKey: retainPipelineHistoryStorageKey)
         let isPressEnterVoiceCommandEnabled = UserDefaults.standard.object(forKey: pressEnterVoiceCommandStorageKey) == nil
             ? true
             : UserDefaults.standard.bool(forKey: pressEnterVoiceCommandStorageKey)
@@ -714,15 +724,25 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let initialAccessibility = AXIsProcessTrusted()
         let initialScreenCapturePermission = CGPreflightScreenCaptureAccess()
         var removedAudioFileNames: [String] = []
-        do {
-            removedAudioFileNames = try pipelineHistoryStore.trim(to: maxPipelineHistoryCount)
-        } catch {
-            print("Failed to trim pipeline history during init: \(error)")
+        let savedHistory: [PipelineHistoryItem]
+        if retainPipelineHistory {
+            do {
+                removedAudioFileNames = try pipelineHistoryStore.trim(to: maxPipelineHistoryCount)
+            } catch {
+                print("Failed to trim pipeline history during init: \(error)")
+            }
+            savedHistory = pipelineHistoryStore.loadAllHistory()
+        } else {
+            do {
+                removedAudioFileNames = try pipelineHistoryStore.clearAll()
+            } catch {
+                print("Failed to clear disabled pipeline history during init: \(error)")
+            }
+            savedHistory = []
         }
         for audioFileName in removedAudioFileNames {
             Self.deleteAudioFile(audioFileName)
         }
-        let savedHistory = pipelineHistoryStore.loadAllHistory()
 
         let selectedMicrophoneID = UserDefaults.standard.string(forKey: selectedMicrophoneStorageKey) ?? "default"
 
@@ -767,6 +787,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.realtimeStreamingEnabled = realtimeStreamingEnabled
         self.realtimeStreamingModel = realtimeStreamingModel
         self.dictationAudioInterruptionEnabled = dictationAudioInterruptionEnabled
+        self.retainPipelineHistory = retainPipelineHistory
         self.isPressEnterVoiceCommandEnabled = isPressEnterVoiceCommandEnabled
         self.alertSoundsEnabled = alertSoundsEnabled
         self.soundVolume = soundVolume
@@ -2892,6 +2913,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
         intent: SessionIntent,
         audioFileName: String? = nil
     ) {
+        guard retainPipelineHistory else {
+            if let audioFileName {
+                Self.deleteAudioFile(audioFileName)
+            }
+            return
+        }
+
         let newEntry = PipelineHistoryItem(
             intent: intent.persistedIntent,
             selectedText: intent.persistedSelectedText,

@@ -133,7 +133,7 @@ Behavior:
 """
 
     private let apiKey: String
-    private let baseURL: String
+    private let baseURL: URL?
     private let preferredModel: String
     private let preferredFallbackModel: String
     private let instructionExecutionGuardEnabled: Bool
@@ -154,7 +154,7 @@ Behavior:
         instructionExecutionGuardEnabled: Bool = true
     ) {
         self.apiKey = apiKey
-        self.baseURL = baseURL
+        self.baseURL = try? ProviderURLPolicy.normalizedHTTPBaseURL(from: baseURL)
         self.preferredModel = preferredModel.trimmingCharacters(in: .whitespacesAndNewlines)
         self.preferredFallbackModel = preferredFallbackModel.trimmingCharacters(in: .whitespacesAndNewlines)
         self.instructionExecutionGuardEnabled = instructionExecutionGuardEnabled
@@ -474,7 +474,12 @@ Behavior:
         customSystemPrompt: String = "",
         outputLanguage: String = ""
     ) async throws -> PostProcessingResult {
-        var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
+        guard let baseURL else {
+            throw PostProcessingError.invalidInput(ProviderURLPolicy.secureHTTPProviderMessage)
+        }
+        var request = URLRequest(url: baseURL
+            .appendingPathComponent("chat")
+            .appendingPathComponent("completions"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -571,7 +576,7 @@ Model: \(model)
                 await LLMCooldownManager.shared.setCooldown(model, retryAfterSeconds: cooldown.seconds, persist: cooldown.isDaily)
                 throw PostProcessingError.rateLimited(model: model, retryAfter: cooldown.seconds)
             }
-            let message = String(data: data, encoding: .utf8) ?? ""
+            let message = Self.sanitizedProviderError(statusCode: httpResponse.statusCode, data: data)
             throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
         }
 
@@ -614,7 +619,12 @@ Model: \(model)
         customVocabulary: [String],
         outputLanguage: String = ""
     ) async throws -> PostProcessingResult {
-        var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
+        guard let baseURL else {
+            throw PostProcessingError.invalidInput(ProviderURLPolicy.secureHTTPProviderMessage)
+        }
+        var request = URLRequest(url: baseURL
+            .appendingPathComponent("chat")
+            .appendingPathComponent("completions"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -709,7 +719,7 @@ Model: \(model)
                 await LLMCooldownManager.shared.setCooldown(model, retryAfterSeconds: cooldown.seconds, persist: cooldown.isDaily)
                 throw PostProcessingError.rateLimited(model: model, retryAfter: cooldown.seconds)
             }
-            let message = String(data: data, encoding: .utf8) ?? ""
+            let message = Self.sanitizedProviderError(statusCode: httpResponse.statusCode, data: data)
             throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
         }
 
@@ -777,6 +787,8 @@ Model: \(model)
         } catch let error as PostProcessingError {
             let shouldFallback: Bool
             switch error {
+            case .rateLimited:
+                shouldFallback = true
             case .requestFailed(let statusCode, _):
                 shouldFallback = statusCode == 429
             case .emptyOutput:
@@ -798,7 +810,12 @@ Model: \(model)
         targetLanguage: String,
         model: String
     ) async throws -> PostProcessingResult {
-        var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
+        guard let baseURL else {
+            throw PostProcessingError.invalidInput(ProviderURLPolicy.secureHTTPProviderMessage)
+        }
+        var request = URLRequest(url: baseURL
+            .appendingPathComponent("chat")
+            .appendingPathComponent("completions"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -856,7 +873,16 @@ Model: \(model)
             throw PostProcessingError.invalidResponse("No HTTP response")
         }
         guard httpResponse.statusCode == 200 else {
-            let message = String(data: data, encoding: .utf8) ?? ""
+            if httpResponse.statusCode == 429 {
+                let cooldown = LLMCooldownManager.rateLimitCooldown(from: httpResponse)
+                await LLMCooldownManager.shared.setCooldown(
+                    model,
+                    retryAfterSeconds: cooldown.seconds,
+                    persist: cooldown.isDaily
+                )
+                throw PostProcessingError.rateLimited(model: model, retryAfter: cooldown.seconds)
+            }
+            let message = Self.sanitizedProviderError(statusCode: httpResponse.statusCode, data: data)
             throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
         }
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -894,6 +920,13 @@ Model: \(model)
             result = result.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return result
+    }
+
+    private static func sanitizedProviderError(statusCode: Int, data: Data) -> String {
+        if data.isEmpty {
+            return "Provider returned HTTP \(statusCode) with no response body."
+        }
+        return "Provider returned HTTP \(statusCode) with \(data.count) bytes of error details."
     }
 
     private func sanitizePostProcessedTranscript(_ value: String) -> String {
