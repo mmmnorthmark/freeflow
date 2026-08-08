@@ -723,26 +723,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         let initialAccessibility = AXIsProcessTrusted()
         let initialScreenCapturePermission = CGPreflightScreenCaptureAccess()
-        var removedAudioFileNames: [String] = []
-        let savedHistory: [PipelineHistoryItem]
-        if retainPipelineHistory {
-            do {
-                removedAudioFileNames = try pipelineHistoryStore.trim(to: maxPipelineHistoryCount)
-            } catch {
-                print("Failed to trim pipeline history during init: \(error)")
-            }
-            savedHistory = pipelineHistoryStore.loadAllHistory()
-        } else {
-            do {
-                removedAudioFileNames = try pipelineHistoryStore.clearAll()
-            } catch {
-                print("Failed to clear disabled pipeline history during init: \(error)")
-            }
-            savedHistory = []
-        }
-        for audioFileName in removedAudioFileNames {
+        let historyStartup = PipelineHistoryRetentionPolicy.prepareForStartup(
+            retentionEnabled: retainPipelineHistory,
+            maxCount: maxPipelineHistoryCount,
+            trim: pipelineHistoryStore.trim,
+            clear: pipelineHistoryStore.clearAll,
+            load: pipelineHistoryStore.loadAllHistory,
+            reportError: { print($0) }
+        )
+        for audioFileName in historyStartup.audioFileNamesToDelete {
             Self.deleteAudioFile(audioFileName)
         }
+        let savedHistory = historyStartup.history
 
         let selectedMicrophoneID = UserDefaults.standard.string(forKey: selectedMicrophoneStorageKey) ?? "default"
 
@@ -2913,10 +2905,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         intent: SessionIntent,
         audioFileName: String? = nil
     ) {
-        guard retainPipelineHistory else {
-            if let audioFileName {
-                Self.deleteAudioFile(audioFileName)
-            }
+        if PipelineHistoryRetentionPolicy.discardAudioIfRetentionDisabled(
+            retentionEnabled: retainPipelineHistory,
+            audioFileName: audioFileName,
+            deleteAudioFile: Self.deleteAudioFile
+        ) {
             return
         }
 

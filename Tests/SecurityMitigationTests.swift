@@ -21,6 +21,9 @@ enum SecurityMitigationTests {
         testExistingKeychainSecretWinsMigration()
         testEmptyPlaintextSecretMigration()
         testKeychainItemPolicy()
+        testRetainedHistoryStartup()
+        testDisabledHistoryStartup()
+        testDisabledHistoryDiscardsAudio()
         print("SecurityMitigationTests passed")
     }
 
@@ -316,6 +319,95 @@ enum SecurityMitigationTests {
         expect(
             accessibility == (kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String),
             "Keychain item is not restricted to this device after first unlock"
+        )
+    }
+
+    private static func testRetainedHistoryStartup() {
+        let item = makeHistoryItem(audioFileName: "kept.m4a")
+        var trimmedTo: Int?
+        var didClear = false
+        let result = PipelineHistoryRetentionPolicy.prepareForStartup(
+            retentionEnabled: true,
+            maxCount: 50,
+            trim: { maxCount in
+                trimmedTo = maxCount
+                return ["trimmed.m4a"]
+            },
+            clear: {
+                didClear = true
+                return []
+            },
+            load: { [item] },
+            reportError: { message in
+                expect(false, "Unexpected retention error: \(message)")
+            }
+        )
+
+        expect(trimmedTo == 50, "Retained history was not trimmed to the configured limit")
+        expect(!didClear, "Retained history was cleared")
+        expect(result.history.count == 1, "Retained history was not loaded")
+        expect(result.audioFileNamesToDelete == ["trimmed.m4a"], "Trimmed audio was not scheduled for deletion")
+    }
+
+    private static func testDisabledHistoryStartup() {
+        var didTrim = false
+        var didLoad = false
+        let result = PipelineHistoryRetentionPolicy.prepareForStartup(
+            retentionEnabled: false,
+            maxCount: 50,
+            trim: { _ in
+                didTrim = true
+                return []
+            },
+            clear: { ["old-audio.m4a"] },
+            load: {
+                didLoad = true
+                return [makeHistoryItem(audioFileName: "old-audio.m4a")]
+            },
+            reportError: { message in
+                expect(false, "Unexpected retention error: \(message)")
+            }
+        )
+
+        expect(!didTrim, "Disabled history was trimmed instead of cleared")
+        expect(!didLoad, "Disabled history was loaded into memory")
+        expect(result.history.isEmpty, "Disabled history was retained")
+        expect(result.audioFileNamesToDelete == ["old-audio.m4a"], "Cleared history audio was not scheduled for deletion")
+    }
+
+    private static func testDisabledHistoryDiscardsAudio() {
+        var deletedAudioFiles: [String] = []
+        let shouldSkipPersistence = PipelineHistoryRetentionPolicy.discardAudioIfRetentionDisabled(
+            retentionEnabled: false,
+            audioFileName: "new-audio.m4a",
+            deleteAudioFile: { deletedAudioFiles.append($0) }
+        )
+        expect(shouldSkipPersistence, "Disabled retention did not prevent persistence")
+        expect(deletedAudioFiles == ["new-audio.m4a"], "Disabled retention did not delete captured audio")
+
+        deletedAudioFiles = []
+        let shouldPersist = !PipelineHistoryRetentionPolicy.discardAudioIfRetentionDisabled(
+            retentionEnabled: true,
+            audioFileName: "kept-audio.m4a",
+            deleteAudioFile: { deletedAudioFiles.append($0) }
+        )
+        expect(shouldPersist, "Enabled retention prevented persistence")
+        expect(deletedAudioFiles.isEmpty, "Enabled retention deleted captured audio")
+    }
+
+    private static func makeHistoryItem(audioFileName: String?) -> PipelineHistoryItem {
+        PipelineHistoryItem(
+            timestamp: Date(timeIntervalSince1970: 0),
+            rawTranscript: "raw",
+            postProcessedTranscript: "processed",
+            postProcessingPrompt: nil,
+            contextSummary: "context",
+            contextScreenshotDataURL: nil,
+            contextScreenshotStatus: "none",
+            postProcessingStatus: "complete",
+            debugStatus: "complete",
+            customVocabulary: "",
+            audioFileName: audioFileName
         )
     }
 
