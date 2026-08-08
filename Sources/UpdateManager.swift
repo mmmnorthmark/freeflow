@@ -200,9 +200,6 @@ final class UpdateManager: ObservableObject {
     private let stabilityBufferDays: TimeInterval = 3
     private let checkIntervalSeconds: TimeInterval = 7 * 24 * 60 * 60 // 7 days
     private let postTranscriptionReminderInterval: TimeInterval = 24 * 60 * 60 // 1 day
-    private let expectedDMGAssetName = "FreeFlow.dmg"
-    private let releaseOwner = "zachlatta"
-    private let releaseRepository = "freeflow"
     private var periodicTimer: Timer?
     private var activeDownloadTask: Task<Void, Never>?
 
@@ -732,13 +729,15 @@ final class UpdateManager: ObservableObject {
     }
 
     func downloadAndInstall(release: GitHubRelease) {
-        guard let dmgAsset = release.assets.first(where: { $0.name == expectedDMGAssetName }) else {
+        guard let dmgAsset = release.assets.first(where: {
+            UpdateSecurityPolicy.isExpectedAssetName($0.name)
+        }) else {
             updateStatus = .error(UpdateSecurityError.missingExpectedAsset.localizedDescription)
             return
         }
 
         guard let downloadURL = URL(string: dmgAsset.browserDownloadUrl),
-              isAllowedInitialDownloadURL(downloadURL, releaseTag: release.tagName) else {
+              UpdateSecurityPolicy.isAllowedInitialDownloadURL(downloadURL, releaseTag: release.tagName) else {
             updateStatus = .error(UpdateSecurityError.untrustedDownloadURL.localizedDescription)
             return
         }
@@ -775,7 +774,7 @@ final class UpdateManager: ObservableObject {
             request.cachePolicy = .reloadIgnoringLocalCacheData
 
             let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
-            guard isAllowedFinalDownloadURL(response.url ?? downloadURL) else {
+            guard UpdateSecurityPolicy.isAllowedFinalDownloadURL(response.url ?? downloadURL) else {
                 throw UpdateSecurityError.untrustedDownloadURL
             }
 
@@ -827,7 +826,7 @@ final class UpdateManager: ObservableObject {
             }
 
             let downloadedBytes = try await downloadTask.value
-            if expectedSize > 0 && downloadedBytes != expectedSize {
+            if !UpdateSecurityPolicy.hasExpectedDownloadSize(expected: expectedSize, actual: downloadedBytes) {
                 throw UpdateSecurityError.unexpectedDownloadSize(expected: expectedSize, actual: downloadedBytes)
             }
             downloadProgress = 1.0
@@ -938,27 +937,6 @@ final class UpdateManager: ObservableObject {
         ])
     }
 
-    private func isAllowedInitialDownloadURL(_ url: URL, releaseTag: String) -> Bool {
-        guard url.scheme?.lowercased() == "https",
-              url.host?.lowercased() == "github.com" else {
-            return false
-        }
-
-        let expectedPath = "/\(releaseOwner)/\(releaseRepository)/releases/download/\(releaseTag)/\(expectedDMGAssetName)"
-        return url.path == expectedPath
-    }
-
-    private func isAllowedFinalDownloadURL(_ url: URL) -> Bool {
-        guard url.scheme?.lowercased() == "https",
-              let host = url.host?.lowercased() else {
-            return false
-        }
-
-        return host == "github.com"
-            || host == "objects.githubusercontent.com"
-            || host.hasSuffix(".githubusercontent.com")
-    }
-
     nonisolated private func validateStagedApp(_ stagedApp: URL) throws {
         let currentBundleID = Bundle.main.bundleIdentifier
         let stagedBundle = Bundle(url: stagedApp)
@@ -993,13 +971,7 @@ final class UpdateManager: ObservableObject {
             executable: "/usr/bin/codesign",
             arguments: ["-dv", "--verbose=4", appURL.path]
         )
-        for line in output.components(separatedBy: .newlines) {
-            guard line.hasPrefix("TeamIdentifier=") else { continue }
-            let value = String(line.dropFirst("TeamIdentifier=".count))
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return value == "not set" ? nil : value
-        }
-        return nil
+        return UpdateSecurityPolicy.signingTeamIdentifier(fromCodesignOutput: output)
     }
 
     nonisolated private func runProcess(

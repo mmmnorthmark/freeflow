@@ -11,6 +11,11 @@ enum SecurityMitigationTests {
         testProviderHTTPErrorRedaction()
         testProviderRealtimeErrorRedaction()
         testTranscriptionErrorMessages()
+        testUpdateAssetPolicy()
+        testUpdateInitialDownloadURLPolicy()
+        testUpdateRedirectURLPolicy()
+        testUpdateDownloadSizePolicy()
+        testSigningTeamIdentifierParsing()
         print("SecurityMitigationTests passed")
     }
 
@@ -154,6 +159,96 @@ enum SecurityMitigationTests {
             expect(message.contains("api.example.com") || status == 400, "Provider host missing for HTTP \(status)")
             expect(!message.contains("{"), "Transcription error included a raw response body")
         }
+    }
+
+    private static func testUpdateAssetPolicy() {
+        expect(UpdateSecurityPolicy.isExpectedAssetName("FreeFlow.dmg"), "Expected release asset was rejected")
+        expect(!UpdateSecurityPolicy.isExpectedAssetName("FreeFlow-1.2.0.dmg"), "Versioned asset name was accepted")
+        expect(!UpdateSecurityPolicy.isExpectedAssetName("FreeFlow.dmg.zip"), "Asset suffix was accepted")
+        expect(!UpdateSecurityPolicy.isExpectedAssetName("freeflow.dmg"), "Case-altered asset was accepted")
+    }
+
+    private static func testUpdateInitialDownloadURLPolicy() {
+        let allowed = URL(string: "https://github.com/zachlatta/freeflow/releases/download/v1.2.0/FreeFlow.dmg")!
+        expect(
+            UpdateSecurityPolicy.isAllowedInitialDownloadURL(allowed, releaseTag: "v1.2.0"),
+            "Expected GitHub release URL was rejected"
+        )
+
+        let rejected = [
+            "http://github.com/zachlatta/freeflow/releases/download/v1.2.0/FreeFlow.dmg",
+            "https://github.com.evil.example/zachlatta/freeflow/releases/download/v1.2.0/FreeFlow.dmg",
+            "https://github.com/attacker/freeflow/releases/download/v1.2.0/FreeFlow.dmg",
+            "https://github.com/zachlatta/freeflow/releases/download/v1.2.0/Other.dmg",
+            "https://user@github.com/zachlatta/freeflow/releases/download/v1.2.0/FreeFlow.dmg",
+            "https://github.com:444/zachlatta/freeflow/releases/download/v1.2.0/FreeFlow.dmg",
+            "https://github.com/zachlatta/freeflow/releases/download/v1.2.0/FreeFlow.dmg?redirect=evil"
+        ]
+        for value in rejected {
+            expect(
+                !UpdateSecurityPolicy.isAllowedInitialDownloadURL(URL(string: value)!, releaseTag: "v1.2.0"),
+                "Untrusted initial update URL was accepted: \(value)"
+            )
+        }
+        expect(
+            !UpdateSecurityPolicy.isAllowedInitialDownloadURL(allowed, releaseTag: "v1.2.0/../../evil"),
+            "Release tag path injection was accepted"
+        )
+    }
+
+    private static func testUpdateRedirectURLPolicy() {
+        let allowed = [
+            "https://github.com/release",
+            "https://objects.githubusercontent.com/release?signature=value",
+            "https://release-assets.githubusercontent.com/release"
+        ]
+        for value in allowed {
+            expect(
+                UpdateSecurityPolicy.isAllowedFinalDownloadURL(URL(string: value)!),
+                "Expected update redirect URL was rejected: \(value)"
+            )
+        }
+
+        let rejected = [
+            "http://objects.githubusercontent.com/release",
+            "https://objects.githubusercontent.com.evil.example/release",
+            "https://evilgithubusercontent.com/release",
+            "https://user@objects.githubusercontent.com/release",
+            "https://objects.githubusercontent.com:444/release"
+        ]
+        for value in rejected {
+            expect(
+                !UpdateSecurityPolicy.isAllowedFinalDownloadURL(URL(string: value)!),
+                "Untrusted update redirect URL was accepted: \(value)"
+            )
+        }
+    }
+
+    private static func testUpdateDownloadSizePolicy() {
+        expect(UpdateSecurityPolicy.hasExpectedDownloadSize(expected: 42, actual: 42), "Matching download size was rejected")
+        expect(!UpdateSecurityPolicy.hasExpectedDownloadSize(expected: 42, actual: 41), "Truncated download was accepted")
+        expect(!UpdateSecurityPolicy.hasExpectedDownloadSize(expected: 42, actual: 43), "Oversized download was accepted")
+        expect(UpdateSecurityPolicy.hasExpectedDownloadSize(expected: 0, actual: 43), "Unknown expected size should not reject a download")
+    }
+
+    private static func testSigningTeamIdentifierParsing() {
+        let signedOutput = """
+        Executable=/Applications/FreeFlow.app/Contents/MacOS/FreeFlow
+        Identifier=com.zachlatta.freeflow
+        TeamIdentifier=ABC123XYZ
+        """
+        expect(
+            UpdateSecurityPolicy.signingTeamIdentifier(fromCodesignOutput: signedOutput) == "ABC123XYZ",
+            "Signing team identifier was not parsed"
+        )
+        expect(
+            UpdateSecurityPolicy.signingTeamIdentifier(fromCodesignOutput: "TeamIdentifier=not set") == nil,
+            "Unsigned marker was treated as a signing team"
+        )
+        expect(
+            UpdateSecurityPolicy.signingTeamIdentifier(fromCodesignOutput: "Identifier=com.example") == nil,
+            "Missing signing team produced a value"
+        )
     }
 
     private static func expectURL(

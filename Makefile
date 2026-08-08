@@ -76,7 +76,7 @@ endif
 test: $(TEST_RUNNER)
 	@$(TEST_RUNNER)
 
-$(TEST_RUNNER): Sources/AppContextService.swift Sources/LLMAPITransport.swift Sources/ModelConfiguration.swift Sources/ProviderErrorPolicy.swift Sources/ProviderURLPolicy.swift Sources/TranscriptionService.swift Tests/AppContextServiceTests.swift Tests/SecurityMitigationTests.swift
+$(TEST_RUNNER): Sources/AppContextService.swift Sources/LLMAPITransport.swift Sources/ModelConfiguration.swift Sources/ProviderErrorPolicy.swift Sources/ProviderURLPolicy.swift Sources/TranscriptionService.swift Sources/UpdateSecurityPolicy.swift Tests/AppContextServiceTests.swift Tests/SecurityMitigationTests.swift
 	@mkdir -p "$(BUILD_DIR)"
 	swiftc \
 		-parse-as-library \
@@ -84,7 +84,7 @@ $(TEST_RUNNER): Sources/AppContextService.swift Sources/LLMAPITransport.swift So
 		-module-cache-path "$(SWIFT_MODULE_CACHE_DIR)" \
 		-sdk $(shell xcrun --show-sdk-path) \
 		-target $(ARCH)-apple-macosx13.0 \
-		Sources/AppContextService.swift Sources/LLMAPITransport.swift Sources/ModelConfiguration.swift Sources/ProviderErrorPolicy.swift Sources/ProviderURLPolicy.swift Sources/TranscriptionService.swift Tests/AppContextServiceTests.swift Tests/SecurityMitigationTests.swift
+		Sources/AppContextService.swift Sources/LLMAPITransport.swift Sources/ModelConfiguration.swift Sources/ProviderErrorPolicy.swift Sources/ProviderURLPolicy.swift Sources/TranscriptionService.swift Sources/UpdateSecurityPolicy.swift Tests/AppContextServiceTests.swift Tests/SecurityMitigationTests.swift
 
 icon: $(ICON_ICNS)
 
