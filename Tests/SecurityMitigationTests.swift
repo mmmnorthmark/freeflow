@@ -8,6 +8,9 @@ enum SecurityMitigationTests {
         testSecureRealtimeProviderURLs()
         testLoopbackRealtimeProviderURLs()
         testInsecureRealtimeProviderURLs()
+        testProviderHTTPErrorRedaction()
+        testProviderRealtimeErrorRedaction()
+        testTranscriptionErrorMessages()
         print("SecurityMitigationTests passed")
     }
 
@@ -110,6 +113,46 @@ enum SecurityMitigationTests {
                 language: nil
             )
             expect(url == nil, "Expected insecure realtime URL to be rejected: \(value)")
+        }
+    }
+
+    private static func testProviderHTTPErrorRedaction() {
+        let secretBody = Data(#"{"error":"secret provider details"}"#.utf8)
+        let message = ProviderErrorPolicy.httpMessage(statusCode: 500, data: secretBody)
+
+        expect(message == "Provider returned HTTP 500 with \(secretBody.count) bytes of error details.", "Unexpected HTTP redaction message")
+        expect(!message.contains("secret provider details"), "Raw HTTP provider error leaked")
+        expect(
+            ProviderErrorPolicy.httpMessage(statusCode: 502, data: Data())
+                == "Provider returned HTTP 502 with no response body.",
+            "Empty provider response was described incorrectly"
+        )
+    }
+
+    private static func testProviderRealtimeErrorRedaction() {
+        let rawMessage = "secret provider details 🔒"
+        let message = ProviderErrorPolicy.realtimeMessage(rawMessage)
+
+        expect(
+            message == "Provider returned \(rawMessage.utf8.count) bytes of realtime error details.",
+            "Unexpected realtime redaction message"
+        )
+        expect(!message.contains("secret provider details"), "Raw realtime provider error leaked")
+        expect(
+            ProviderErrorPolicy.realtimeMessage("") == "Provider returned an unknown realtime error.",
+            "Empty realtime error was described incorrectly"
+        )
+    }
+
+    private static func testTranscriptionErrorMessages() {
+        let statuses = [400, 401, 403, 404, 413, 429, 500, 599, 418]
+        for status in statuses {
+            let message = TranscriptionService.friendlyHTTPMessage(
+                status: status,
+                host: "api.example.com"
+            )
+            expect(message.contains("api.example.com") || status == 400, "Provider host missing for HTTP \(status)")
+            expect(!message.contains("{"), "Transcription error included a raw response body")
         }
     }
 

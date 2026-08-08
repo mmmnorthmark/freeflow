@@ -255,9 +255,7 @@ final class RealtimeTranscriptionService {
             let errObj = json["error"] as? [String: Any]
             let code = errObj?["code"] as? String ?? "unknown"
             let rawMessage = errObj?["message"] as? String ?? ""
-            let message = rawMessage.isEmpty
-                ? "Provider returned an unknown realtime error."
-                : "Provider returned \(rawMessage.utf8.count) bytes of realtime error details."
+            let message = ProviderErrorPolicy.realtimeMessage(rawMessage)
             os_log(.error, log: realtimeLog, "server error [%{public}@] messageBytes=%{public}ld", code, rawMessage.utf8.count)
             let error = RealtimeTranscriptionError.serverError(code: code, message: message)
             stateQueue.sync {

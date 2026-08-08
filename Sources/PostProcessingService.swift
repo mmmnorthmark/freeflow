@@ -576,7 +576,7 @@ Model: \(model)
                 await LLMCooldownManager.shared.setCooldown(model, retryAfterSeconds: cooldown.seconds, persist: cooldown.isDaily)
                 throw PostProcessingError.rateLimited(model: model, retryAfter: cooldown.seconds)
             }
-            let message = Self.sanitizedProviderError(statusCode: httpResponse.statusCode, data: data)
+            let message = ProviderErrorPolicy.httpMessage(statusCode: httpResponse.statusCode, data: data)
             throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
         }
 
@@ -719,7 +719,7 @@ Model: \(model)
                 await LLMCooldownManager.shared.setCooldown(model, retryAfterSeconds: cooldown.seconds, persist: cooldown.isDaily)
                 throw PostProcessingError.rateLimited(model: model, retryAfter: cooldown.seconds)
             }
-            let message = Self.sanitizedProviderError(statusCode: httpResponse.statusCode, data: data)
+            let message = ProviderErrorPolicy.httpMessage(statusCode: httpResponse.statusCode, data: data)
             throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
         }
 
@@ -882,7 +882,7 @@ Model: \(model)
                 )
                 throw PostProcessingError.rateLimited(model: model, retryAfter: cooldown.seconds)
             }
-            let message = Self.sanitizedProviderError(statusCode: httpResponse.statusCode, data: data)
+            let message = ProviderErrorPolicy.httpMessage(statusCode: httpResponse.statusCode, data: data)
             throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
         }
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -920,13 +920,6 @@ Model: \(model)
             result = result.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return result
-    }
-
-    private static func sanitizedProviderError(statusCode: Int, data: Data) -> String {
-        if data.isEmpty {
-            return "Provider returned HTTP \(statusCode) with no response body."
-        }
-        return "Provider returned HTTP \(statusCode) with \(data.count) bytes of error details."
     }
 
     private func sanitizePostProcessedTranscript(_ value: String) -> String {
