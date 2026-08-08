@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 enum SecurityMitigationTests {
     static func run() {
@@ -16,6 +17,10 @@ enum SecurityMitigationTests {
         testUpdateRedirectURLPolicy()
         testUpdateDownloadSizePolicy()
         testSigningTeamIdentifierParsing()
+        testPlaintextSecretMigration()
+        testExistingKeychainSecretWinsMigration()
+        testEmptyPlaintextSecretMigration()
+        testKeychainItemPolicy()
         print("SecurityMitigationTests passed")
     }
 
@@ -248,6 +253,69 @@ enum SecurityMitigationTests {
         expect(
             UpdateSecurityPolicy.signingTeamIdentifier(fromCodesignOutput: "Identifier=com.example") == nil,
             "Missing signing team produced a value"
+        )
+    }
+
+    private static func testPlaintextSecretMigration() {
+        let plan = KeychainStoragePolicy.plaintextMigrationPlan(
+            settings: [
+                "groq_api_key": "legacy-secret",
+                "keychain_migration_done": "true",
+                "unrelated": "preserved"
+            ],
+            account: "groq_api_key",
+            existingKeychainValue: nil
+        )
+
+        expect(plan?.valueToSaveInKeychain == "legacy-secret", "Plaintext secret was not selected for migration")
+        expect(plan?.updatedSettings == ["unrelated": "preserved"], "Legacy secret cleanup changed unrelated settings")
+    }
+
+    private static func testExistingKeychainSecretWinsMigration() {
+        let plan = KeychainStoragePolicy.plaintextMigrationPlan(
+            settings: ["groq_api_key": "stale-plaintext"],
+            account: "groq_api_key",
+            existingKeychainValue: "current-keychain-secret"
+        )
+
+        expect(plan?.valueToSaveInKeychain == nil, "Plaintext secret overwrote an existing Keychain secret")
+        expect(plan?.updatedSettings.isEmpty == true, "Stale plaintext secret was not removed")
+        expect(
+            KeychainStoragePolicy.plaintextMigrationPlan(
+                settings: ["unrelated": "value"],
+                account: "groq_api_key",
+                existingKeychainValue: nil
+            ) == nil,
+            "Migration ran without a legacy plaintext value"
+        )
+    }
+
+    private static func testEmptyPlaintextSecretMigration() {
+        let plan = KeychainStoragePolicy.plaintextMigrationPlan(
+            settings: ["groq_api_key": "  \n"],
+            account: "groq_api_key",
+            existingKeychainValue: nil
+        )
+
+        expect(plan?.valueToSaveInKeychain == nil, "Whitespace-only plaintext secret was migrated")
+        expect(plan?.updatedSettings.isEmpty == true, "Whitespace-only plaintext secret was not removed")
+    }
+
+    private static func testKeychainItemPolicy() {
+        let data = Data("secret".utf8)
+        let query = KeychainStoragePolicy.addQuery(
+            service: "com.example.tests",
+            account: "api-key",
+            data: data
+        )
+
+        expect(query[kSecAttrService as String] as? String == "com.example.tests", "Keychain service mismatch")
+        expect(query[kSecAttrAccount as String] as? String == "api-key", "Keychain account mismatch")
+        expect(query[kSecValueData as String] as? Data == data, "Keychain data mismatch")
+        let accessibility = query[kSecAttrAccessible as String] as? String
+        expect(
+            accessibility == (kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String),
+            "Keychain item is not restricted to this device after first unlock"
         )
     }
 

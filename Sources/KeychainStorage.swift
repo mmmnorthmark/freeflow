@@ -71,19 +71,18 @@ enum AppSettingsStorage {
     // MARK: - Plaintext migration
 
     private static func migratePlaintextSettingToKeychainIfNeeded(account: String) {
-        var dict = loadSettings()
-        guard let plaintextValue = dict[account] else { return }
-
-        let existingKeychainValue = loadFromKeychain(account: account)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if existingKeychainValue.isEmpty,
-           !plaintextValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            saveToKeychain(plaintextValue, account: account)
+        guard let plan = KeychainStoragePolicy.plaintextMigrationPlan(
+            settings: loadSettings(),
+            account: account,
+            existingKeychainValue: loadFromKeychain(account: account)
+        ) else {
+            return
         }
 
-        dict.removeValue(forKey: account)
-        dict.removeValue(forKey: "keychain_migration_done")
-        writeSettings(dict)
+        if let value = plan.valueToSaveInKeychain {
+            saveToKeychain(value, account: account)
+        }
+        writeSettings(plan.updatedSettings)
     }
 
     private static func removePlaintextSetting(account: String) {
@@ -97,13 +96,9 @@ enum AppSettingsStorage {
     // MARK: - Keychain helpers
 
     private static func loadFromKeychain(account: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: bundleID,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
+        var query = KeychainStoragePolicy.baseQuery(service: bundleID, account: account)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         guard status == errSecSuccess,
@@ -116,11 +111,7 @@ enum AppSettingsStorage {
 
     private static func saveToKeychain(_ value: String, account: String) {
         let data = Data(value.utf8)
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: bundleID,
-            kSecAttrAccount as String: account
-        ]
+        let query = KeychainStoragePolicy.baseQuery(service: bundleID, account: account)
 
         let updateAttributes: [String: Any] = [
             kSecValueData as String: data
@@ -131,22 +122,12 @@ enum AppSettingsStorage {
             return
         }
 
-        let addQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: bundleID,
-            kSecAttrAccount as String: account,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
-            kSecValueData as String: data
-        ]
+        let addQuery = KeychainStoragePolicy.addQuery(service: bundleID, account: account, data: data)
         SecItemAdd(addQuery as CFDictionary, nil)
     }
 
     private static func deleteFromKeychain(account: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: bundleID,
-            kSecAttrAccount as String: account
-        ]
+        let query = KeychainStoragePolicy.baseQuery(service: bundleID, account: account)
         SecItemDelete(query as CFDictionary)
     }
 }
