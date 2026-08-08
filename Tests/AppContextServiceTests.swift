@@ -8,6 +8,7 @@ struct AppContextServiceTests {
         testNonStrippingModelPreservesExistingBehavior()
         testDeprecatedGroqModelsAreNotPredefined()
         testQwenCleanupDisablesReasoning()
+        SecurityMitigationTests.run()
         print("AppContextServiceTests passed")
     }
 

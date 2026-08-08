@@ -78,11 +78,22 @@ enum ProviderURLPolicy {
 
     static func isLoopbackHost(_ host: String) -> Bool {
         let normalized = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
-        return normalized == "localhost"
+        if normalized == "localhost"
             || normalized == "::1"
-            || normalized == "0:0:0:0:0:0:0:1"
-            || normalized == "127.0.0.1"
-            || normalized.hasPrefix("127.")
+            || normalized == "0:0:0:0:0:0:0:1" {
+            return true
+        }
+
+        let octets = normalized.split(separator: ".", omittingEmptySubsequences: false)
+        guard octets.count == 4, octets[0] == "127" else { return false }
+        return octets.allSatisfy { octet in
+            guard !octet.isEmpty,
+                  octet.allSatisfy(\.isNumber),
+                  let value = Int(octet) else {
+                return false
+            }
+            return (0...255).contains(value)
+        }
     }
 
     private static func normalizedPath(_ path: String) -> String {
